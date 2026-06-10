@@ -115,6 +115,34 @@ class AzureVIClient:
     # API calls
     # ------------------------------------------------------------------
 
+    def submit_file(self, file_path: str, name: str, language: str = "auto") -> str:
+        """Upload a local video file to Azure VI and return the videoId."""
+        import os
+        url = (
+            f"{_VI_BASE}/{self.location}/Accounts/{self.account_id}/Videos"
+        )
+        params = {
+            "name": name[:80],
+            "language": language,
+            "indexingPreset": "Default",
+            "streamingPreset": "NoStreaming",
+            "privacy": "Private",
+        }
+        with open(file_path, "rb") as fh:
+            mime = "video/mp4" if file_path.endswith(".mp4") else "application/octet-stream"
+            files = {"file": (os.path.basename(file_path), fh, mime)}
+            resp = requests.post(
+                url,
+                headers=self._auth_headers(),
+                params=params,
+                files=files,
+                timeout=600,  # large uploads can take several minutes
+            )
+        resp.raise_for_status()
+        video_id = resp.json()["id"]
+        logger.info(f"Azure VI accepted file '{name}' → videoId={video_id}")
+        return video_id
+
     def submit_url(self, video_url: str, name: str, language: str = "auto") -> str:
         """Submit a video URL for indexing. Returns the Azure VI videoId."""
         resp = requests.post(

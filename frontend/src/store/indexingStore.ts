@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type IndexingPhase = 'idle' | 'submitting' | 'indexing' | 'done' | 'error';
+export type IndexingPhase = 'idle' | 'submitting' | 'downloading' | 'uploading' | 'indexing' | 'done' | 'error';
 
 interface IndexingState {
   phase: IndexingPhase;

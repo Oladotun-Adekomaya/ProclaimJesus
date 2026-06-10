@@ -88,7 +88,7 @@ Replaces WhisperX entirely. Benefits for sermons:
 - Keyword/topic extraction (grace, faith, repentance, etc.)
 - 50+ language support (Yoruba, Igbo, Pidgin support via custom language models)
 - No GPU required on the server
-- Free tier: 2,400 minutes/month
+- Trial tier: 2,400 minutes **lifetime total** (not per month) — upgrade to a paid ARM account for ongoing use
 
 ### 3. Dual Distribution: Web App + Electron Desktop
 Same React + FastAPI codebase ships as both:

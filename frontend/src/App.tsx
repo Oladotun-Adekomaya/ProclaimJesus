@@ -81,8 +81,10 @@ export default function App() {
         const data = await res.json();
         setVideoId(data.videoId);
         setTitle(data.title || 'Sermon');
-        setVideoSource('', data.title || 'Sermon');  // set title in editor now
-        setPhase('indexing');
+        setVideoSource('', data.title || 'Sermon');
+        // YouTube URLs start in 'downloading' phase; others go straight to 'indexing'
+        const isYouTube = /youtube\.com|youtu\.be/i.test(url);
+        setPhase(isYouTube ? 'downloading' : 'indexing');
       } catch (err: any) {
         setSubmitError(err.message || 'Submission failed. Check the URL and try again.');
         setPhase('idle');
@@ -147,7 +149,7 @@ export default function App() {
   }
 
   // ── Render: URL input landing ───────────────────────────────────────────────
-  if (!videoPath && phase !== 'indexing') {
+  if (!videoPath && phase !== 'indexing' && phase !== 'downloading' && phase !== 'uploading') {
     return (
       <URLInput
         onSubmit={handleUrlSubmit}
@@ -158,8 +160,8 @@ export default function App() {
     );
   }
 
-  // ── Render: Azure indexing progress ────────────────────────────────────────
-  if (phase === 'indexing' && videoId) {
+  // ── Render: Azure indexing progress (also shown during YouTube download) ───
+  if ((phase === 'indexing' || phase === 'downloading' || phase === 'uploading') && videoId) {
     return (
       <IndexingProgress
         videoId={videoId}

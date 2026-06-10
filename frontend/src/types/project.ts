@@ -4,6 +4,8 @@ export interface Word {
   end: number;
   confidence: number;
   speaker?: string;
+  speakerId?: number;
+  deleted?: boolean;
 }
 
 export interface Segment {
@@ -37,10 +39,20 @@ export interface ProjectFile {
   modifiedAt: string;
 }
 
+export interface Speaker {
+  id: number;
+  name: string;
+  totalSeconds: number;
+}
+
 export interface TranscriptionResult {
   words: Word[];
   segments: Segment[];
   language: string;
+  speakers?: Speaker[];
+  topics?: string[];
+  keywords?: string[];
+  videoStreamUrl?: string | null;
 }
 
 export interface ExportOptions {

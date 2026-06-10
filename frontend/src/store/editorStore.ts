@@ -28,6 +28,7 @@ interface EditorState {
 interface EditorActions {
   setBackendUrl: (url: string) => void;
   loadVideo: (path: string) => void;
+  setVideoSource: (url: string, title: string) => void;
   setTranscription: (result: TranscriptionResult) => void;
   setCurrentTime: (time: number) => void;
   setDuration: (duration: number) => void;
@@ -84,15 +85,43 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         });
       },
 
+      // For Azure VI: set a remote video URL without a local file path
+      setVideoSource: (url, title) => {
+        const backend = get().backendUrl;
+        set({
+          ...initialState,
+          backendUrl: backend,
+          videoPath: title,
+          videoUrl: url || null,
+        });
+      },
+
       setTranscription: (result) => {
+        // Normalise Azure VI word format (text/speakerId) → CutScript format (word/speaker)
+        const normaliseWord = (w: any) => ({
+          ...w,
+          word: w.word ?? w.text ?? '',
+          speaker: w.speaker ?? (w.speakerId != null ? `Speaker ${w.speakerId}` : undefined),
+        });
+
+        const normalisedWords = result.words.map(normaliseWord);
+
         let globalIdx = 0;
         const annotatedSegments = result.segments.map((seg) => {
-          const annotated = { ...seg, globalStartIndex: globalIdx };
-          globalIdx += seg.words.length;
+          const normWords = seg.words.map(normaliseWord);
+          const annotated = { ...seg, words: normWords, globalStartIndex: globalIdx };
+          globalIdx += normWords.length;
           return annotated;
         });
+
+        // If the result carries a stream URL (Azure VI), update the video source
+        if (result.videoStreamUrl) {
+          const backend = get().backendUrl;
+          set({ videoUrl: result.videoStreamUrl, backendUrl: backend });
+        }
+
         set({
-          words: result.words,
+          words: normalisedWords,
           segments: annotatedSegments,
           language: result.language,
           deletedRanges: [],

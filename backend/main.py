@@ -8,7 +8,7 @@ from fastapi import FastAPI, Query, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from routers import transcribe, export, ai, captions, audio
+from routers import transcribe, transcription, export, ai, captions, audio
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(transcribe.router)
+app.include_router(transcription.router)
 app.include_router(export.router)
 app.include_router(ai.router)
 app.include_router(captions.router)
@@ -115,3 +116,22 @@ async def serve_local_file(request: Request, path: str = Query(...)):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/health/azure")
+async def health_azure():
+    from services.azure_vi_service import get_client
+    try:
+        result = get_client().check_health()
+        return result
+    except RuntimeError as e:
+        return {"ok": False, "detail": str(e)}
+
+
+@app.get("/health/ytdlp")
+async def health_ytdlp():
+    import subprocess
+    proc = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True, timeout=10)
+    if proc.returncode == 0:
+        return {"ok": True, "version": proc.stdout.strip()}
+    return {"ok": False, "detail": proc.stderr.strip()}

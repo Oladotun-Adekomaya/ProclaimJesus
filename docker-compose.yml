@@ -1,0 +1,51 @@
+# ProclaimJesus — Docker Compose
+#
+# Coolify deployment:
+#   1. In Coolify → New Resource → Docker Compose → point to this repo
+#   2. Set the environment variables listed in .env.example via Coolify's
+#      "Environment Variables" UI (they are injected into the backend service)
+#   3. Expose only the `frontend` service publicly — Nginx proxies /api/ to
+#      the backend internally so the backend never needs its own public domain
+#   4. Save & Deploy — Coolify handles SSL and auto-deploys on every git push
+#
+# Local development: use `npm run dev` at the repo root instead of this file.
+
+services:
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      - AZURE_VI_ACCOUNT_ID=${AZURE_VI_ACCOUNT_ID}
+      - AZURE_VI_LOCATION=${AZURE_VI_LOCATION:-trial}
+      - AZURE_VI_API_KEY=${AZURE_VI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # Optional ARM-based auth (leave blank if using trial API key)
+      - AZURE_VI_SUBSCRIPTION_ID=${AZURE_VI_SUBSCRIPTION_ID:-}
+      - AZURE_VI_RESOURCE_GROUP=${AZURE_VI_RESOURCE_GROUP:-}
+      - AZURE_VI_TENANT_ID=${AZURE_VI_TENANT_ID:-}
+      - AZURE_VI_CLIENT_ID=${AZURE_VI_CLIENT_ID:-}
+      - AZURE_VI_CLIENT_SECRET=${AZURE_VI_CLIENT_SECRET:-}
+    volumes:
+      - export_tmp:/tmp
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8642/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # /api is the Nginx-proxied path to the backend — no change needed here
+        VITE_BACKEND_URL: /api
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  export_tmp:

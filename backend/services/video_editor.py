@@ -13,6 +13,13 @@ from typing import List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _resolve_path(p: str) -> str:
+    """Resolve a local path to absolute. Pass HTTP/HTTPS URLs through unchanged."""
+    if p.startswith(('http://', 'https://')):
+        return p
+    return str(Path(p).resolve())
+
+
 def _find_ffmpeg() -> str:
     """Locate ffmpeg binary."""
     for cmd in ["ffmpeg", "ffmpeg.exe"]:
@@ -42,7 +49,7 @@ def export_stream_copy(
         output_path on success
     """
     ffmpeg = _find_ffmpeg()
-    input_path = str(Path(input_path).resolve())
+    input_path = _resolve_path(input_path)
     output_path = str(Path(output_path).resolve())
 
     if not keep_segments:
@@ -111,7 +118,7 @@ def export_reencode(
     format conversion, and avoids stream-copy edge cases.
     """
     ffmpeg = _find_ffmpeg()
-    input_path = str(Path(input_path).resolve())
+    input_path = _resolve_path(input_path)
     output_path = str(Path(output_path).resolve())
 
     if not keep_segments:
@@ -179,7 +186,7 @@ def export_reencode_with_subs(
     Applies trim+concat first, then overlays the subtitle file.
     """
     ffmpeg = _find_ffmpeg()
-    input_path = str(Path(input_path).resolve())
+    input_path = _resolve_path(input_path)
     output_path = str(Path(output_path).resolve())
     subtitle_path = str(Path(subtitle_path).resolve())
 
@@ -255,7 +262,7 @@ def export_with_overlays(
     from services.ffmpeg_filter_builder import build_overlay_filters
 
     ffmpeg = _find_ffmpeg()
-    input_path = str(Path(input_path).resolve())
+    input_path = _resolve_path(input_path)
     output_path = str(Path(output_path).resolve())
 
     if not keep_segments:

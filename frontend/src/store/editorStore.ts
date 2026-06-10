@@ -69,7 +69,7 @@ const initialState: EditorState = {
   transcriptionProgress: 0,
   isExporting: false,
   exportProgress: 0,
-  backendUrl: 'http://localhost:8642',
+  backendUrl: (import.meta.env.VITE_BACKEND_URL as string) || 'http://localhost:8642',
 };
 
 let nextRangeId = 1;

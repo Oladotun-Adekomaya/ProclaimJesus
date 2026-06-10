@@ -7,8 +7,13 @@ import type { ExportOptions } from '../types/project';
 const IS_ELECTRON = !!window.electronAPI;
 
 export default function ExportDialog() {
-  const { videoPath, words, deletedRanges, isExporting, exportProgress, backendUrl, setExporting, getKeepSegments } =
+  const { videoPath, videoUrl, words, deletedRanges, isExporting, exportProgress, backendUrl, setExporting, getKeepSegments } =
     useEditorStore();
+
+  // For Azure VI videos, videoPath is the title string, not a file path.
+  // Use the actual stream URL as FFmpeg input in that case.
+  const isLocalFile = !!videoPath && (videoPath.startsWith('/') || /^[A-Z]:\\/i.test(videoPath));
+  const inputPath = isLocalFile ? videoPath : (videoUrl ?? videoPath);
   const overlayLayers = useOverlayStore((s) => s.layers);
 
   const hasCuts = deletedRanges.length > 0;
@@ -58,7 +63,7 @@ export default function ExportDialog() {
       }
 
       const body: Record<string, unknown> = {
-        input_path: videoPath,
+        input_path: inputPath,
         keep_segments: keepSegments,
         words: options.captions !== 'none' ? words : undefined,
         deleted_indices: options.captions !== 'none' ? [...deletedSet] : undefined,

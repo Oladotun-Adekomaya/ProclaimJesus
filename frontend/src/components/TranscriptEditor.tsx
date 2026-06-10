@@ -2,10 +2,12 @@ import { useCallback, useRef, useEffect, useMemo, useState } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { Virtuoso } from 'react-virtuoso';
 import { Trash2, RotateCcw } from 'lucide-react';
+import SpeakerFilter from './SpeakerFilter';
 
 export default function TranscriptEditor() {
   const words = useEditorStore((s) => s.words);
   const segments = useEditorStore((s) => s.segments);
+  const speakers = useEditorStore((s) => s.speakers);
   const deletedRanges = useEditorStore((s) => s.deletedRanges);
   const selectedWordIndices = useEditorStore((s) => s.selectedWordIndices);
   const hoveredWordIndex = useEditorStore((s) => s.hoveredWordIndex);
@@ -14,6 +16,28 @@ export default function TranscriptEditor() {
   const deleteSelectedWords = useEditorStore((s) => s.deleteSelectedWords);
   const restoreRange = useEditorStore((s) => s.restoreRange);
   const getWordAtTime = useEditorStore((s) => s.getWordAtTime);
+
+  const [hiddenSpeakerIds, setHiddenSpeakerIds] = useState<Set<number>>(new Set());
+
+  const handleSpeakerToggle = useCallback((id: number) => {
+    setHiddenSpeakerIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  // Indices into `segments` that pass the speaker filter
+  const visibleSegmentIndices = useMemo(
+    () =>
+      hiddenSpeakerIds.size > 0
+        ? segments
+            .map((_, i) => i)
+            .filter((i) => !hiddenSpeakerIds.has(segments[i].speakerId ?? 0))
+        : segments.map((_, i) => i),
+    [segments, hiddenSpeakerIds],
+  );
 
   const selectionStart = useRef<number | null>(null);
   const wasDragging = useRef(false);
@@ -111,8 +135,8 @@ export default function TranscriptEditor() {
   );
 
   const renderSegment = useCallback(
-    (index: number) => {
-      const segment = segments[index];
+    (listIndex: number) => {
+      const segment = segments[visibleSegmentIndices[listIndex]];
       if (!segment) return null;
       return (
         <div className="mb-3 px-4">
@@ -165,24 +189,31 @@ export default function TranscriptEditor() {
         </div>
       );
     },
-    [segments, deletedSet, selectedSet, activeWordIndex, hoveredWordIndex, handleWordMouseDown, handleWordMouseEnter, setHoveredWordIndex, getRangeForWord, restoreRange],
+    [segments, visibleSegmentIndices, deletedSet, selectedSet, activeWordIndex, hoveredWordIndex, handleWordMouseDown, handleWordMouseEnter, setHoveredWordIndex, getRangeForWord, restoreRange],
   );
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-editor-border shrink-0">
-        <span className="text-xs text-editor-text-muted flex-1">
-          {words.length} words &middot; {deletedRanges.length} cuts
-        </span>
-        {selectedWordIndices.length > 0 && (
-          <button
-            onClick={deleteSelectedWords}
-            className="flex items-center gap-1 px-2 py-1 text-xs bg-editor-danger/20 text-editor-danger rounded hover:bg-editor-danger/30 transition-colors"
-          >
-            <Trash2 className="w-3 h-3" />
-            Delete {selectedWordIndices.length} words
-          </button>
-        )}
+      <div className="px-4 py-2 border-b border-editor-border shrink-0 space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-editor-text-muted flex-1">
+            {words.length} words &middot; {deletedRanges.length} cuts
+          </span>
+          {selectedWordIndices.length > 0 && (
+            <button
+              onClick={deleteSelectedWords}
+              className="flex items-center gap-1 px-2 py-1 text-xs bg-editor-danger/20 text-editor-danger rounded hover:bg-editor-danger/30 transition-colors"
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete {selectedWordIndices.length} words
+            </button>
+          )}
+        </div>
+        <SpeakerFilter
+          speakers={speakers}
+          hiddenIds={hiddenSpeakerIds}
+          onToggle={handleSpeakerToggle}
+        />
       </div>
 
       <div
@@ -192,7 +223,7 @@ export default function TranscriptEditor() {
       >
         <Virtuoso
           ref={virtuosoRef}
-          totalCount={segments.length}
+          totalCount={visibleSegmentIndices.length}
           itemContent={renderSegment}
           overscan={200}
           className="h-full"

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { temporal } from 'zundo';
-import type { Word, Segment, DeletedRange, TranscriptionResult } from '../types/project';
+import type { Word, Segment, DeletedRange, TranscriptionResult, Speaker } from '../types/project';
 
 interface EditorState {
   videoPath: string | null;
@@ -9,6 +9,9 @@ interface EditorState {
   segments: Segment[];
   deletedRanges: DeletedRange[];
   language: string;
+  speakers: Speaker[];
+  topics: string[];
+  keywords: string[];
 
   currentTime: number;
   duration: number;
@@ -53,6 +56,9 @@ const initialState: EditorState = {
   segments: [],
   deletedRanges: [],
   language: '',
+  speakers: [],
+  topics: [],
+  keywords: [],
   currentTime: 0,
   duration: 0,
   isPlaying: false,
@@ -97,33 +103,47 @@ export const useEditorStore = create<EditorState & EditorActions>()(
       },
 
       setTranscription: (result) => {
+        // Build a speakerId → name lookup from the speakers array
+        const speakerMap = new Map<number, string>(
+          (result.speakers ?? []).map((s) => [s.id, s.name]),
+        );
+        const speakerName = (id?: number) =>
+          id != null ? (speakerMap.get(id) ?? `Speaker ${id}`) : undefined;
+
         // Normalise Azure VI word format (text/speakerId) → CutScript format (word/speaker)
         const normaliseWord = (w: any) => ({
           ...w,
           word: w.word ?? w.text ?? '',
-          speaker: w.speaker ?? (w.speakerId != null ? `Speaker ${w.speakerId}` : undefined),
+          speaker: w.speaker ?? speakerName(w.speakerId),
         });
 
         const normalisedWords = result.words.map(normaliseWord);
 
         let globalIdx = 0;
-        const annotatedSegments = result.segments.map((seg) => {
+        const annotatedSegments = result.segments.map((seg: any) => {
           const normWords = seg.words.map(normaliseWord);
-          const annotated = { ...seg, words: normWords, globalStartIndex: globalIdx };
+          const annotated = {
+            ...seg,
+            words: normWords,
+            speaker: seg.speaker ?? speakerName(seg.speakerId),
+            globalStartIndex: globalIdx,
+          };
           globalIdx += normWords.length;
           return annotated;
         });
 
         // If the result carries a stream URL (Azure VI), update the video source
         if (result.videoStreamUrl) {
-          const backend = get().backendUrl;
-          set({ videoUrl: result.videoStreamUrl, backendUrl: backend });
+          set({ videoUrl: result.videoStreamUrl });
         }
 
         set({
           words: normalisedWords,
           segments: annotatedSegments,
           language: result.language,
+          speakers: result.speakers ?? [],
+          topics: result.topics ?? [],
+          keywords: result.keywords ?? [],
           deletedRanges: [],
           selectedWordIndices: [],
         });

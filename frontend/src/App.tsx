@@ -9,6 +9,7 @@ import ExportDialog from './components/ExportDialog';
 import SettingsPanel from './components/SettingsPanel';
 import URLInput from './components/URLInput';
 import IndexingProgress from './components/IndexingProgress';
+import ThemeTags from './components/ThemeTags';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { Radio, FolderOpen, Settings, Sparkles, Download } from 'lucide-react';
 
@@ -207,7 +208,10 @@ export default function App() {
             {/* Transcript */}
             <div className="w-1/2 border-l border-editor-border flex flex-col min-h-0">
               {words.length > 0 ? (
-                <TranscriptEditor />
+                <>
+                  <ThemeTags />
+                  <TranscriptEditor />
+                </>
               ) : (
                 <div className="flex-1 flex items-center justify-center text-editor-text-muted text-sm">
                   No transcript yet

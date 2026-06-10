@@ -15,6 +15,7 @@ export interface Segment {
   text: string;
   words: Word[];
   speaker?: string;
+  speakerId?: number;
   globalStartIndex: number;
 }
 

@@ -1,13 +1,18 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import { useEditorStore } from '../store/editorStore';
-import { Download, Loader2, Zap, Cog, Info } from 'lucide-react';
+import { useOverlayStore } from '../store/overlayStore';
+import { Download, Loader2, Zap, Cog, Info, Layers } from 'lucide-react';
 import type { ExportOptions } from '../types/project';
+
+const IS_ELECTRON = !!window.electronAPI;
 
 export default function ExportDialog() {
   const { videoPath, words, deletedRanges, isExporting, exportProgress, backendUrl, setExporting, getKeepSegments } =
     useEditorStore();
+  const overlayLayers = useOverlayStore((s) => s.layers);
 
   const hasCuts = deletedRanges.length > 0;
+  const hasOverlays = overlayLayers.length > 0;
 
   const [options, setOptions] = useState<Omit<ExportOptions, 'outputPath'>>({
     mode: 'fast',
@@ -16,19 +21,32 @@ export default function ExportDialog() {
     enhanceAudio: false,
     captions: 'none',
   });
+  const [exportError, setExportError] = useState<string | null>(null);
+  const [exportDone, setExportDone] = useState(false);
+
+  // Overlays require re-encode; enforce it visually
+  const effectiveMode = hasOverlays ? 'reencode' : options.mode;
 
   const handleExport = useCallback(async () => {
     if (!videoPath) return;
+    setExportError(null);
+    setExportDone(false);
 
-    const outputPath = await window.electronAPI?.saveFile({
-      defaultPath: videoPath.replace(/\.[^.]+$/, '_edited.mp4'),
-      filters: [
-        { name: 'MP4', extensions: ['mp4'] },
-        { name: 'MOV', extensions: ['mov'] },
-        { name: 'WebM', extensions: ['webm'] },
-      ],
-    });
-    if (!outputPath) return;
+    let outputPath: string | null = null;
+
+    // Electron: prompt user for save path
+    if (IS_ELECTRON) {
+      outputPath = await window.electronAPI!.saveFile({
+        defaultPath: videoPath.replace(/\.[^.]+$/, '_edited.' + options.format),
+        filters: [
+          { name: 'MP4', extensions: ['mp4'] },
+          { name: 'MOV', extensions: ['mov'] },
+          { name: 'WebM', extensions: ['webm'] },
+        ],
+      });
+      if (!outputPath) return; // user cancelled
+    }
+    // Web: output_path omitted → backend creates temp file
 
     setExporting(true, 0);
     try {
@@ -39,43 +57,81 @@ export default function ExportDialog() {
         for (const idx of range.wordIndices) deletedSet.add(idx);
       }
 
+      const body: Record<string, unknown> = {
+        input_path: videoPath,
+        keep_segments: keepSegments,
+        words: options.captions !== 'none' ? words : undefined,
+        deleted_indices: options.captions !== 'none' ? [...deletedSet] : undefined,
+        mode: effectiveMode,
+        resolution: options.resolution,
+        format: options.format,
+        enhanceAudio: options.enhanceAudio,
+        captions: options.captions,
+        overlays: hasOverlays ? overlayLayers : undefined,
+      };
+      if (outputPath) body.output_path = outputPath;
+
       const res = await fetch(`${backendUrl}/export`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          input_path: videoPath,
-          output_path: outputPath,
-          keep_segments: keepSegments,
-          words: options.captions !== 'none' ? words : undefined,
-          deleted_indices: options.captions !== 'none' ? [...deletedSet] : undefined,
-          ...options,
-        }),
+        body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(`Export failed: ${res.statusText}`);
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || res.statusText);
+      }
+
+      const data = await res.json();
       setExporting(false, 100);
-    } catch (err) {
-      console.error('Export error:', err);
+      setExportDone(true);
+
+      // Web mode: trigger browser download from the temp output path
+      if (!IS_ELECTRON && data.output_path) {
+        const basename = data.output_path.split(/[\\/]/).pop() || 'sermon_clip.' + options.format;
+        const dlUrl = `${backendUrl}/export/download?path=${encodeURIComponent(data.output_path)}&filename=${encodeURIComponent(basename)}`;
+        const a = document.createElement('a');
+        a.href = dlUrl;
+        a.download = basename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
+    } catch (err: any) {
+      setExportError(err.message || 'Export failed.');
       setExporting(false);
     }
-  }, [videoPath, options, backendUrl, setExporting, getKeepSegments]);
+  }, [
+    videoPath, options, effectiveMode, overlayLayers, hasOverlays,
+    backendUrl, setExporting, getKeepSegments, deletedRanges, words,
+  ]);
 
   return (
     <div className="p-4 space-y-5">
       <h3 className="text-sm font-semibold">Export Video</h3>
+
+      {/* Overlay badge */}
+      {hasOverlays && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded bg-editor-accent/10 border border-editor-accent/30 text-xs text-editor-accent">
+          <Layers className="w-3.5 h-3.5 shrink-0" />
+          <span>{overlayLayers.length} overlay layer{overlayLayers.length !== 1 ? 's' : ''} will be composited</span>
+        </div>
+      )}
 
       {/* Mode */}
       <fieldset className="space-y-2">
         <legend className="text-xs text-editor-text-muted font-medium">Export Mode</legend>
         <div className="grid grid-cols-2 gap-2">
           <ModeCard
-            active={options.mode === 'fast'}
-            onClick={() => setOptions((o) => ({ ...o, mode: 'fast' }))}
+            active={effectiveMode === 'fast'}
+            onClick={() => !hasOverlays && setOptions((o) => ({ ...o, mode: 'fast' }))}
+            disabled={hasOverlays}
             icon={<Zap className="w-4 h-4" />}
             title="Fast"
             desc="Stream copy, seconds"
           />
           <ModeCard
-            active={options.mode === 'reencode'}
+            active={effectiveMode === 'reencode'}
             onClick={() => setOptions((o) => ({ ...o, mode: 'reencode' }))}
             icon={<Cog className="w-4 h-4" />}
             title="Re-encode"
@@ -84,19 +140,17 @@ export default function ExportDialog() {
         </div>
       </fieldset>
 
-      {/* Resolution (only for re-encode) */}
-      {options.mode === 'reencode' && (
-        <SelectField
-          label="Resolution"
-          value={options.resolution}
-          onChange={(v) => setOptions((o) => ({ ...o, resolution: v as ExportOptions['resolution'] }))}
-          options={[
-            { value: '720p', label: '720p (HD)' },
-            { value: '1080p', label: '1080p (Full HD)' },
-            { value: '4k', label: '4K (Ultra HD)' },
-          ]}
-        />
-      )}
+      {/* Resolution */}
+      <SelectField
+        label="Resolution"
+        value={options.resolution}
+        onChange={(v) => setOptions((o) => ({ ...o, resolution: v as ExportOptions['resolution'] }))}
+        options={[
+          { value: '720p', label: '720p (HD)' },
+          { value: '1080p', label: '1080p (Full HD)' },
+          { value: '4k', label: '4K (Ultra HD)' },
+        ]}
+      />
 
       {/* Format */}
       <SelectField
@@ -137,33 +191,47 @@ export default function ExportDialog() {
       <button
         onClick={handleExport}
         disabled={isExporting || !videoPath}
-        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-editor-accent hover:bg-editor-accent-hover disabled:opacity-50 rounded-lg text-sm font-semibold transition-colors"
+        className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-editor-accent hover:bg-editor-accent-hover disabled:opacity-50 rounded-lg text-sm font-semibold transition-colors text-white"
       >
         {isExporting ? (
           <>
             <Loader2 className="w-4 h-4 animate-spin" />
-            Exporting... {Math.round(exportProgress)}%
+            Exporting…
           </>
         ) : (
           <>
             <Download className="w-4 h-4" />
-            Export
+            {IS_ELECTRON ? 'Export…' : 'Export & Download'}
           </>
         )}
       </button>
 
-      {options.mode === 'fast' && !hasCuts && (
+      {/* Feedback */}
+      {exportDone && !isExporting && (
+        <p className="text-xs text-editor-success text-center">Export complete!</p>
+      )}
+      {exportError && (
+        <p className="text-xs text-editor-danger text-center">{exportError}</p>
+      )}
+
+      {/* Info hints */}
+      {effectiveMode === 'fast' && !hasCuts && !hasOverlays && (
         <p className="text-[10px] text-editor-text-muted text-center">
-          Fast mode uses stream copy &mdash; no quality loss, exports in seconds.
+          Fast mode uses stream copy — no quality loss, exports in seconds.
         </p>
       )}
-      {options.mode === 'fast' && hasCuts && (
+      {effectiveMode === 'fast' && hasCuts && (
         <div className="flex items-start gap-1.5 p-2 bg-editor-accent/10 rounded text-[10px] text-editor-accent">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <span>
-            Word-level cuts require re-encoding for frame-accurate output. Export will
-            automatically use re-encode mode. This takes longer but ensures your cuts are precise.
+            Word-level cuts use re-encode mode automatically for frame-accurate output.
           </span>
+        </div>
+      )}
+      {hasOverlays && (
+        <div className="flex items-start gap-1.5 p-2 bg-editor-accent/10 rounded text-[10px] text-editor-accent">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>Overlay layers require re-encode. Fast mode is disabled.</span>
         </div>
       )}
     </div>
@@ -173,12 +241,14 @@ export default function ExportDialog() {
 function ModeCard({
   active,
   onClick,
+  disabled,
   icon,
   title,
   desc,
 }: {
   active: boolean;
   onClick: () => void;
+  disabled?: boolean;
   icon: React.ReactNode;
   title: string;
   desc: string;
@@ -186,11 +256,12 @@ function ModeCard({
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={`flex flex-col items-center gap-1 p-3 rounded-lg border-2 transition-colors ${
         active
           ? 'border-editor-accent bg-editor-accent/10'
           : 'border-editor-border hover:border-editor-text-muted'
-      }`}
+      } ${disabled ? 'opacity-40 cursor-not-allowed' : ''}`}
     >
       {icon}
       <span className="text-xs font-medium">{title}</span>

@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import os
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +236,123 @@ def export_reencode_with_subs(
         raise RuntimeError(f"FFmpeg re-encode with subs failed: {result.stderr[-500:]}")
 
     return output_path
+
+
+def export_with_overlays(
+    input_path: str,
+    output_path: str,
+    keep_segments: List[dict],
+    overlay_layers: list,
+    clip_duration: float,
+    resolution: str = "1080p",
+    format_hint: str = "mp4",
+    subtitle_path: Optional[str] = None,
+) -> str:
+    """
+    Export with optional overlay layers (image/text) and optional burn-in subtitles.
+    Always re-encodes — overlays require frame-level processing.
+    """
+    from services.ffmpeg_filter_builder import build_overlay_filters
+
+    ffmpeg = _find_ffmpeg()
+    input_path = str(Path(input_path).resolve())
+    output_path = str(Path(output_path).resolve())
+
+    if not keep_segments:
+        raise ValueError("No segments to export")
+
+    scale_map = {
+        "720p": "scale=-2:720",
+        "1080p": "scale=-2:1080",
+        "4k": "scale=-2:2160",
+    }
+
+    # ── Build trim + concat ──────────────────────────────────────────────────
+    filter_parts = []
+    for i, seg in enumerate(keep_segments):
+        filter_parts.append(
+            f"[0:v]trim=start={seg['start']}:end={seg['end']},setpts=PTS-STARTPTS[v{i}];"
+            f"[0:a]atrim=start={seg['start']}:end={seg['end']},asetpts=PTS-STARTPTS[a{i}];"
+        )
+    n = len(keep_segments)
+    concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(n))
+    filter_parts.append(f"{concat_inputs}concat=n={n}:v=1:a=1[outv][outa]")
+
+    # ── Scale ────────────────────────────────────────────────────────────────
+    scale = scale_map.get(resolution, "")
+    current_v = "outv"
+    if scale:
+        filter_parts.append(f"[outv]{scale}[outv_scaled]")
+        current_v = "outv_scaled"
+
+    # ── Overlay filters ──────────────────────────────────────────────────────
+    # Image layers need extra -i inputs (starting at index 1 since 0 = main video)
+    temp_files, overlay_filter_parts, current_v = build_overlay_filters(
+        overlay_layers,
+        clip_duration,
+        resolution=resolution,
+        in_label=current_v,
+        first_input_index=1,
+    )
+
+    # Count how many image inputs were actually added (for the -i args)
+    image_inputs = [
+        temp_files[j]
+        for j, layer in enumerate(
+            [l for l in overlay_layers if l.type == "image" and l.src]
+        )
+        if j < len(temp_files)
+    ]
+
+    for f in overlay_filter_parts:
+        filter_parts.append(f)
+
+    # ── Subtitles ────────────────────────────────────────────────────────────
+    if subtitle_path:
+        escaped_sub = subtitle_path.replace("\\", "/").replace(":", "\\:")
+        next_label = f"{current_v}_sub"
+        filter_parts.append(f"[{current_v}]ass='{escaped_sub}'[{next_label}]")
+        current_v = next_label
+
+    # Assemble filter_complex (parts already contain ';' where needed for multi-line
+    # entries; join remaining with ';')
+    base = "".join(filter_parts[:n * 2 + 1])  # trim+concat parts (already ';' joined)
+    extra = ";".join(filter_parts[n * 2 + 1:])
+    filter_complex = base + (";" + extra if extra else "")
+
+    # ── Build command ────────────────────────────────────────────────────────
+    codec_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-c:a", "aac", "-b:a", "192k"]
+    if format_hint == "webm":
+        codec_args = ["-c:v", "libvpx-vp9", "-crf", "30", "-b:v", "0", "-c:a", "libopus"]
+
+    extra_inputs: list[str] = []
+    for img_path in temp_files:
+        extra_inputs += ["-i", img_path]
+
+    cmd = [
+        ffmpeg, "-y",
+        "-i", input_path,
+        *extra_inputs,
+        "-filter_complex", filter_complex,
+        "-map", f"[{current_v}]",
+        "-map", "[outa]",
+        *codec_args,
+        "-movflags", "+faststart",
+        output_path,
+    ]
+
+    logger.info(f"Exporting {n} segments with overlays -> {output_path} ({resolution})")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg overlay export failed: {result.stderr[-500:]}")
+        return output_path
+    finally:
+        for f in temp_files:
+            try:
+                os.unlink(f)
+            except OSError:
+                pass
 
 
 def get_video_info(input_path: str) -> dict:

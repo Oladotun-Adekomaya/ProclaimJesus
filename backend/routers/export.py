@@ -8,9 +8,10 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from services.video_editor import export_stream_copy, export_reencode, export_reencode_with_subs
+from services.video_editor import export_stream_copy, export_reencode, export_reencode_with_subs, export_with_overlays
 from services.audio_cleaner import clean_audio
 from services.caption_generator import generate_srt, generate_ass, save_captions
+from services.overlay_schema import OverlayLayer
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -39,6 +40,7 @@ class ExportRequest(BaseModel):
     captions: str = "none"
     words: Optional[List[ExportWordModel]] = None
     deleted_indices: Optional[List[int]] = None
+    overlays: Optional[List[OverlayLayer]] = None
 
 
 def _mux_audio(video_path: str, audio_path: str, output_path: str) -> str:
@@ -68,11 +70,12 @@ async def export_video(req: ExportRequest):
         if not segments:
             raise HTTPException(status_code=400, detail="No segments to export")
 
-        use_stream_copy = req.mode == "fast" and len(segments) == 1
+        has_overlays = bool(req.overlays)
+        use_stream_copy = req.mode == "fast" and len(segments) == 1 and not has_overlays
         needs_reencode_for_subs = req.captions == "burn-in"
 
-        # Burn-in captions require re-encode
-        if needs_reencode_for_subs:
+        # Burn-in captions or overlays require re-encode
+        if needs_reencode_for_subs or has_overlays:
             use_stream_copy = False
 
         words_dicts = [w.model_dump() for w in req.words] if req.words else []
@@ -87,9 +90,22 @@ async def export_video(req: ExportRequest):
             tmp.close()
             ass_path = tmp.name
 
+        clip_duration = sum(s.end - s.start for s in req.keep_segments)
+
         try:
             if use_stream_copy:
                 output = export_stream_copy(req.input_path, req.output_path, segments)
+            elif has_overlays:
+                output = export_with_overlays(
+                    req.input_path,
+                    req.output_path,
+                    segments,
+                    req.overlays or [],
+                    clip_duration,
+                    resolution=req.resolution,
+                    format_hint=req.format,
+                    subtitle_path=ass_path,
+                )
             elif ass_path:
                 output = export_reencode_with_subs(
                     req.input_path,

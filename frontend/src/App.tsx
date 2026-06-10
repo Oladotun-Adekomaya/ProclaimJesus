@@ -11,12 +11,13 @@ import URLInput from './components/URLInput';
 import IndexingProgress from './components/IndexingProgress';
 import ThemeTags from './components/ThemeTags';
 import ClipSuggestions from './components/ClipSuggestions';
+import ClipPreview from './components/ClipPreview';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { Radio, FolderOpen, Settings, Sparkles, Download, Scissors } from 'lucide-react';
+import { Radio, FolderOpen, Settings, Sparkles, Download, Scissors, Eye } from 'lucide-react';
 
 const IS_ELECTRON = !!window.electronAPI;
 
-type Panel = 'clips' | 'ai' | 'settings' | 'export' | null;
+type Panel = 'clips' | 'ai' | 'preview' | 'settings' | 'export' | null;
 
 export default function App() {
   const {
@@ -181,6 +182,13 @@ export default function App() {
             disabled={words.length === 0}
           />
           <ToolbarButton
+            icon={<Eye className="w-4 h-4" />}
+            label="Preview"
+            active={activePanel === 'preview'}
+            onClick={() => togglePanel('preview')}
+            disabled={words.length === 0}
+          />
+          <ToolbarButton
             icon={<Sparkles className="w-4 h-4" />}
             label="AI"
             active={activePanel === 'ai'}
@@ -238,6 +246,7 @@ export default function App() {
         {activePanel && (
           <div className="w-80 border-l border-editor-border overflow-y-auto shrink-0">
             {activePanel === 'clips' && <ClipSuggestions />}
+            {activePanel === 'preview' && <ClipPreview onExport={() => setActivePanel('export')} />}
             {activePanel === 'ai' && <AIPanel />}
             {activePanel === 'export' && <ExportDialog />}
             {activePanel === 'settings' && <SettingsPanel />}

@@ -1,5 +1,6 @@
 const { spawn } = require('child_process');
 const path = require('path');
+const fs = require('fs');
 const http = require('http');
 
 class PythonBackend {
@@ -10,12 +11,11 @@ class PythonBackend {
   }
 
   async start() {
-    // In dev mode, check if a backend is already running (e.g. from `npm run dev:backend`)
-    // If so, reuse it instead of spawning a duplicate.
+    // In dev mode, reuse an already-running backend (from `npm run dev:backend`)
     if (this.isDev) {
       const alreadyRunning = await this._isPortOpen(2000);
       if (alreadyRunning) {
-        console.log(`[backend] Dev backend already running on port ${this.port} — reusing it.`);
+        console.log(`[backend] Dev backend already running on port ${this.port} — reusing.`);
         return;
       }
     }
@@ -24,7 +24,8 @@ class PythonBackend {
       ? path.join(__dirname, '..', 'backend')
       : path.join(process.resourcesPath, 'backend');
 
-    const pythonCmd = process.platform === 'win32' ? 'python' : 'python3';
+    const pythonCmd = this._findPython(backendDir);
+    console.log(`[backend] Using Python: ${pythonCmd}`);
 
     this.process = spawn(pythonCmd, [
       '-m', 'uvicorn', 'main:app',
@@ -53,8 +54,31 @@ class PythonBackend {
       this.process = null;
     });
 
-    await this._waitForReady(30000);
+    await this._waitForReady(45000);
     console.log(`[backend] Ready on port ${this.port}`);
+  }
+
+  /**
+   * Find the best Python executable to use.
+   * Priority: .venv in backendDir → system python3 → python
+   */
+  _findPython(backendDir) {
+    const venvPaths = process.platform === 'win32'
+      ? [
+          path.join(backendDir, '.venv', 'Scripts', 'python.exe'),
+          path.join(backendDir, '.venv', 'Scripts', 'python3.exe'),
+        ]
+      : [
+          path.join(backendDir, '.venv', 'bin', 'python3'),
+          path.join(backendDir, '.venv', 'bin', 'python'),
+        ];
+
+    for (const venvPy of venvPaths) {
+      if (fs.existsSync(venvPy)) return venvPy;
+    }
+
+    // Fall back to system Python
+    return process.platform === 'win32' ? 'python' : 'python3';
   }
 
   _isPortOpen(timeoutMs) {
@@ -68,23 +92,12 @@ class PythonBackend {
     });
   }
 
-  stop() {
-    if (this.process) {
-      if (process.platform === 'win32') {
-        spawn('taskkill', ['/pid', String(this.process.pid), '/f', '/t']);
-      } else {
-        this.process.kill('SIGTERM');
-      }
-      this.process = null;
-    }
-  }
-
   _waitForReady(timeoutMs) {
     const startTime = Date.now();
     return new Promise((resolve, reject) => {
       const check = () => {
         if (Date.now() - startTime > timeoutMs) {
-          reject(new Error('Backend startup timed out'));
+          reject(new Error(`Backend startup timed out after ${timeoutMs / 1000}s`));
           return;
         }
         const req = http.get(`http://127.0.0.1:${this.port}/health`, (res) => {
@@ -97,8 +110,19 @@ class PythonBackend {
         req.on('error', () => setTimeout(check, 500));
         req.end();
       };
-      setTimeout(check, 1000);
+      setTimeout(check, 1500);
     });
+  }
+
+  stop() {
+    if (this.process) {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/pid', String(this.process.pid), '/f', '/t']);
+      } else {
+        this.process.kill('SIGTERM');
+      }
+      this.process = null;
+    }
   }
 }
 

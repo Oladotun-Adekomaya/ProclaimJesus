@@ -10,11 +10,11 @@ const BACKEND_PORT = 8642;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1400,
+    width: 1440,
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: 'CutScript',
+    title: 'ProclaimJesus',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -26,7 +26,8 @@ function createWindow() {
 
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
-    mainWindow.webContents.openDevTools();
+    // Uncomment to open DevTools automatically in dev:
+    // mainWindow.webContents.openDevTools();
   } else {
     mainWindow.loadFile(path.join(__dirname, '..', 'frontend', 'dist', 'index.html'));
   }
@@ -43,7 +44,6 @@ function createWindow() {
 app.whenReady().then(async () => {
   pythonBackend = new PythonBackend(BACKEND_PORT, isDev);
   await pythonBackend.start();
-
   createWindow();
 
   app.on('activate', () => {
@@ -65,13 +65,13 @@ app.on('before-quit', () => {
   }
 });
 
-// IPC Handlers
+// ── IPC handlers ─────────────────────────────────────────────────────────────
 
 ipcMain.handle('dialog:openFile', async (_event, options) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: [
-      { name: 'Video Files', extensions: ['mp4', 'avi', 'mov', 'mkv', 'webm'] },
+      { name: 'Video Files', extensions: ['mp4', 'avi', 'mov', 'mkv', 'webm', 'm4v'] },
       { name: 'Audio Files', extensions: ['m4a', 'wav', 'mp3', 'flac'] },
       { name: 'All Files', extensions: ['*'] },
     ],
@@ -84,7 +84,6 @@ ipcMain.handle('dialog:saveFile', async (_event, options) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     filters: [
       { name: 'Video Files', extensions: ['mp4', 'mov', 'webm'] },
-      { name: 'Project Files', extensions: ['aive'] },
     ],
     ...options,
   });
@@ -95,7 +94,7 @@ ipcMain.handle('dialog:openProject', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
     filters: [
-      { name: 'AI Video Editor Project', extensions: ['aive'] },
+      { name: 'ProclaimJesus Project', extensions: ['pj'] },
     ],
   });
   return result.canceled ? null : result.filePaths[0];

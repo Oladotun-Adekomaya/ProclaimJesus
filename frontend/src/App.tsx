@@ -29,6 +29,7 @@ export default function App() {
     setTranscription,
     setTranscribing,
     setVideoSource,
+    loadVideo,
     backendUrl,
     reset: resetEditor,
   } = useEditorStore();
@@ -113,6 +114,17 @@ export default function App() {
     [setError],
   );
 
+  // ── Local file (Electron only) ──────────────────────────────────────────────
+
+  const handleLocalFile = useCallback(
+    (filePath: string) => {
+      resetIndexing();
+      setSubmitError(null);
+      loadVideo(filePath);
+    },
+    [loadVideo, resetIndexing],
+  );
+
   // ── Reset back to URL input ─────────────────────────────────────────────────
 
   const handleReset = useCallback(() => {
@@ -139,6 +151,7 @@ export default function App() {
     return (
       <URLInput
         onSubmit={handleUrlSubmit}
+        onLocalFile={handleLocalFile}
         isSubmitting={phase === 'submitting'}
         error={submitError || (phase === 'error' ? errorMessage : null)}
       />

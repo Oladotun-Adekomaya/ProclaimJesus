@@ -1,19 +1,30 @@
 import { useState } from 'react';
-import { Link, Loader2, Radio } from 'lucide-react';
+import { Link, Loader2, Radio, FolderOpen } from 'lucide-react';
+
+const IS_ELECTRON = !!window.electronAPI;
 
 interface Props {
   onSubmit: (url: string) => void;
+  onLocalFile?: (path: string) => void;
   isSubmitting: boolean;
   error: string | null;
 }
 
-export default function URLInput({ onSubmit, isSubmitting, error }: Props) {
+export default function URLInput({ onSubmit, onLocalFile, isSubmitting, error }: Props) {
   const [url, setUrl] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = url.trim();
     if (trimmed) onSubmit(trimmed);
+  };
+
+  const handleOpenFile = async () => {
+    if (!window.electronAPI) return;
+    const filePath = await window.electronAPI.openFile({
+      filters: [{ name: 'Video', extensions: ['mp4', 'mov', 'avi', 'mkv', 'webm', 'm4v'] }],
+    });
+    if (filePath && onLocalFile) onLocalFile(filePath);
   };
 
   return (
@@ -52,12 +63,31 @@ export default function URLInput({ onSubmit, isSubmitting, error }: Props) {
           {isSubmitting ? (
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
-              Submitting...
+              Submitting…
             </>
           ) : (
             'Transcribe Sermon'
           )}
         </button>
+
+        {IS_ELECTRON && (
+          <>
+            <div className="flex items-center gap-3 py-1">
+              <hr className="flex-1 border-editor-border" />
+              <span className="text-[11px] text-editor-text-muted">or</span>
+              <hr className="flex-1 border-editor-border" />
+            </div>
+            <button
+              type="button"
+              onClick={handleOpenFile}
+              disabled={isSubmitting}
+              className="w-full flex items-center justify-center gap-2 py-3 bg-editor-surface hover:bg-editor-border disabled:opacity-40 rounded-lg text-sm text-editor-text font-medium transition-colors border border-editor-border"
+            >
+              <FolderOpen className="w-4 h-4" />
+              Open Local Video File
+            </button>
+          </>
+        )}
 
         <p className="text-[11px] text-editor-text-muted text-center">
           Supports YouTube · Facebook · Vimeo · direct MP4 links

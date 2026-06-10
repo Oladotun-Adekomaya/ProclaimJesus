@@ -113,3 +113,24 @@ export interface SermonClipSuggestion {
   hasScripture: boolean;
   hasAltarCall: boolean;
 }
+
+export interface OverlayLayer {
+  id: string;
+  type: 'image' | 'text';
+  startTime: number;
+  endTime: number | 'end';
+  position: { x: number; y: number };   // 0–100 (% of canvas)
+  size: { width: number; height: number }; // 0–100 (% of canvas width)
+
+  // Image-only
+  src?: string;     // base64 data URL
+  opacity?: number; // 0–1
+
+  // Text-only
+  content?: string;
+  fontSize?: number;
+  fontColor?: string;
+  fontFamily?: string;
+  backgroundColor?: string;
+  bold?: boolean;
+}

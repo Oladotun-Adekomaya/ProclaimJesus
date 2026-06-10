@@ -45,6 +45,7 @@ interface EditorActions {
   setExporting: (active: boolean, progress?: number) => void;
   getKeepSegments: () => Array<{ start: number; end: number }>;
   getWordAtTime: (time: number) => number;
+  applyClipRange: (startTime: number, endTime: number) => void;
   loadProject: (projectData: any) => void;
   reset: () => void;
 }
@@ -236,6 +237,44 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         }
 
         return segments;
+      },
+
+      applyClipRange: (startTime, endTime) => {
+        const { words, deletedRanges } = get();
+        if (words.length === 0) return;
+
+        const newRanges = [...deletedRanges];
+
+        // Delete everything before the clip
+        const firstKeep = words.findIndex((w) => w.start >= startTime);
+        if (firstKeep > 0) {
+          newRanges.push({
+            id: `dr_${nextRangeId++}`,
+            start: words[0].start,
+            end: words[firstKeep - 1].end,
+            wordIndices: Array.from({ length: firstKeep }, (_, i) => i),
+          });
+        }
+
+        // Delete everything after the clip
+        let lastKeep = -1;
+        for (let i = words.length - 1; i >= 0; i--) {
+          if (words[i].end <= endTime) { lastKeep = i; break; }
+        }
+        if (lastKeep < words.length - 1) {
+          const afterStart = lastKeep + 1;
+          newRanges.push({
+            id: `dr_${nextRangeId++}`,
+            start: words[afterStart].start,
+            end: words[words.length - 1].end,
+            wordIndices: Array.from(
+              { length: words.length - afterStart },
+              (_, i) => afterStart + i,
+            ),
+          });
+        }
+
+        set({ deletedRanges: newRanges, selectedWordIndices: [] });
       },
 
       getWordAtTime: (time) => {

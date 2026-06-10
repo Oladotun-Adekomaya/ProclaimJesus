@@ -1,12 +1,14 @@
 """AI feature endpoints: filler word detection, clip creation, Ollama model listing."""
 
 import logging
+import os
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from services.ai_provider import AIProvider, detect_filler_words, create_clip_suggestion
+from services.sermon_ai_service import suggest_sermon_clips
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -74,6 +76,33 @@ async def create_clip(req: ClipRequest):
         return result
     except Exception as e:
         logger.error(f"Clip creation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class SermonClipRequest(BaseModel):
+    segments: List[dict]
+    topics: List[str] = []
+    keywords: List[str] = []
+    platform: str = "shorts"
+    api_key: Optional[str] = None
+
+
+@router.post("/ai/sermon-clips")
+async def sermon_clips(req: SermonClipRequest):
+    try:
+        key = req.api_key or os.environ.get("ANTHROPIC_API_KEY")
+        clips = suggest_sermon_clips(
+            segments=req.segments,
+            topics=req.topics,
+            keywords=req.keywords,
+            platform=req.platform,
+            api_key=key,
+        )
+        return {"clips": clips}
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        logger.error(f"Sermon clip suggestion failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

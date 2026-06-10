@@ -97,3 +97,19 @@ export interface ClipSuggestion {
   endTime: number;
   reason: string;
 }
+
+export type Platform = 'shorts' | 'reels' | 'tiktok' | 'custom';
+
+export interface SermonClipSuggestion {
+  id: string;
+  title: string;
+  startTime: number;
+  endTime: number;
+  duration: number;
+  platform: Platform;
+  score: number;
+  rationale: string;
+  themes: string[];
+  hasScripture: boolean;
+  hasAltarCall: boolean;
+}

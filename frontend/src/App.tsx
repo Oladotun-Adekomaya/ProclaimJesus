@@ -10,12 +10,13 @@ import SettingsPanel from './components/SettingsPanel';
 import URLInput from './components/URLInput';
 import IndexingProgress from './components/IndexingProgress';
 import ThemeTags from './components/ThemeTags';
+import ClipSuggestions from './components/ClipSuggestions';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
-import { Radio, FolderOpen, Settings, Sparkles, Download } from 'lucide-react';
+import { Radio, FolderOpen, Settings, Sparkles, Download, Scissors } from 'lucide-react';
 
 const IS_ELECTRON = !!window.electronAPI;
 
-type Panel = 'ai' | 'settings' | 'export' | null;
+type Panel = 'clips' | 'ai' | 'settings' | 'export' | null;
 
 export default function App() {
   const {
@@ -173,6 +174,13 @@ export default function App() {
             onClick={handleReset}
           />
           <ToolbarButton
+            icon={<Scissors className="w-4 h-4" />}
+            label="Clips"
+            active={activePanel === 'clips'}
+            onClick={() => togglePanel('clips')}
+            disabled={words.length === 0}
+          />
+          <ToolbarButton
             icon={<Sparkles className="w-4 h-4" />}
             label="AI"
             active={activePanel === 'ai'}
@@ -229,6 +237,7 @@ export default function App() {
         {/* Right panel */}
         {activePanel && (
           <div className="w-80 border-l border-editor-border overflow-y-auto shrink-0">
+            {activePanel === 'clips' && <ClipSuggestions />}
             {activePanel === 'ai' && <AIPanel />}
             {activePanel === 'export' && <ExportDialog />}
             {activePanel === 'settings' && <SettingsPanel />}

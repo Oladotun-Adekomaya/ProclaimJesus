@@ -30,14 +30,30 @@ export interface DeletedRange extends TimeRange {
 }
 
 export interface ProjectFile {
-  version: 1;
-  videoPath: string;
+  version: 2;
+  savedAt: string;
+  title: string;
+
+  // Video source
+  videoPath: string | null;   // local file path, or display title for remote
+  videoUrl: string | null;    // Azure VI stream URL (may expire)
+  videoId: string | null;     // Azure VI videoId — used to refresh expired stream URL
+  sourceUrl: string;          // original URL the user submitted
+
+  // Transcription
   words: Word[];
   segments: Segment[];
   deletedRanges: DeletedRange[];
   language: string;
-  createdAt: string;
-  modifiedAt: string;
+  speakers: Speaker[];
+  topics: string[];
+  keywords: string[];
+
+  // AI-generated clip suggestions
+  clipSuggestions: SermonClipSuggestion[];
+
+  // Overlay layers
+  overlayLayers: OverlayLayer[];
 }
 
 export interface Speaker {
@@ -64,6 +80,7 @@ export interface ExportOptions {
   enhanceAudio: boolean;
   captions: 'none' | 'burn-in' | 'sidecar';
   captionStyle?: CaptionStyle;
+  aspectRatio: '16:9' | '9:16' | '1:1';
 }
 
 export interface CaptionStyle {

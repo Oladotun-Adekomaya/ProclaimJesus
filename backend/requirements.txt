@@ -14,3 +14,7 @@ anthropic>=0.39.0
 
 # URL resolution (Facebook, Vimeo, etc.)
 yt-dlp>=2024.1.0
+
+# Auto-reframe (face-centered 9:16 crop for Shorts/Reels)
+mediapipe>=0.10.14
+opencv-python-headless>=4.10.0

@@ -4,6 +4,7 @@ interface ElectronAPI {
   openFile: (options?: Record<string, unknown>) => Promise<string | null>;
   saveFile: (options?: Record<string, unknown>) => Promise<string | null>;
   openProject: () => Promise<string | null>;
+  saveProject: (defaultName?: string) => Promise<string | null>;
   getBackendUrl: () => Promise<string>;
   encryptString: (data: string) => Promise<string>;
   decryptString: (encrypted: string) => Promise<string>;

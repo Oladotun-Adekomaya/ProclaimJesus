@@ -5,7 +5,7 @@ import { Sparkles, Scissors, Film, Loader2, Check, X, Play, Download } from 'luc
 import type { ClipSuggestion } from '../types/project';
 
 export default function AIPanel() {
-  const { words, videoPath, backendUrl, deleteWordRange, setCurrentTime } = useEditorStore();
+  const { words, videoPath, videoUrl, backendUrl, deleteWordRange, setCurrentTime } = useEditorStore();
   const {
     defaultProvider,
     providers,
@@ -21,9 +21,15 @@ export default function AIPanel() {
   } = useAIStore();
 
   const [activeTab, setActiveTab] = useState<'filler' | 'clips'>('filler');
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  // For Azure VI videos, videoPath is the title string — use videoUrl as the real source
+  const isLocalFile = !!videoPath && (videoPath.startsWith('/') || /^[A-Z]:\\/i.test(videoPath));
+  const videoInputPath = isLocalFile ? videoPath : (videoUrl ?? videoPath);
 
   const detectFillers = useCallback(async () => {
     if (words.length === 0) return;
+    setAiError(null);
     setProcessing(true, 'Detecting filler words...');
     try {
       const config = providers[defaultProvider];
@@ -41,11 +47,14 @@ export default function AIPanel() {
           custom_filler_words: customFillerWords || undefined,
         }),
       });
-      if (!res.ok) throw new Error('Filler detection failed');
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || 'Filler detection failed');
+      }
       const data = await res.json();
       setFillerResult(data);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setAiError(err.message || 'Filler detection failed.');
     } finally {
       setProcessing(false);
     }
@@ -53,6 +62,7 @@ export default function AIPanel() {
 
   const createClips = useCallback(async () => {
     if (words.length === 0) return;
+    setAiError(null);
     setProcessing(true, 'Finding best clip segments...');
     try {
       const config = providers[defaultProvider];
@@ -75,11 +85,14 @@ export default function AIPanel() {
           target_duration: 60,
         }),
       });
-      if (!res.ok) throw new Error('Clip creation failed');
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || 'Clip creation failed');
+      }
       const data = await res.json();
       setClipSuggestions(data.clips || []);
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setAiError(err.message || 'Clip creation failed.');
     } finally {
       setProcessing(false);
     }
@@ -107,39 +120,61 @@ export default function AIPanel() {
   );
 
   const [exportingClipIndex, setExportingClipIndex] = useState<number | null>(null);
+  const [exportClipError, setExportClipError] = useState<string | null>(null);
+  const [exportClipDone, setExportClipDone] = useState(false);
 
   const handleExportClip = useCallback(
     async (clip: ClipSuggestion, index: number) => {
-      if (!videoPath) return;
+      if (!videoInputPath) return;
       setExportingClipIndex(index);
+      setExportClipError(null);
+      setExportClipDone(false);
       try {
-        const safeName = clip.title.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
-        const dirSep = videoPath.lastIndexOf('\\') >= 0 ? '\\' : '/';
-        const dir = videoPath.substring(0, videoPath.lastIndexOf(dirSep));
-        const outputPath = `${dir}${dirSep}${safeName}_clip.mp4`;
+        const body: Record<string, unknown> = {
+          input_path: videoInputPath,
+          keep_segments: [{ start: clip.startTime, end: clip.endTime }],
+          mode: 'fast',
+          format: 'mp4',
+        };
+
+        // Electron: write directly to disk next to the source file (local files only)
+        if (isLocalFile && videoPath) {
+          const safeName = clip.title.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
+          const sep = videoPath.lastIndexOf('\\') >= 0 ? '\\' : '/';
+          const dir = videoPath.substring(0, videoPath.lastIndexOf(sep));
+          body.output_path = `${dir}${sep}${safeName}_clip.mp4`;
+        }
+        // Web / Azure VI: omit output_path → backend creates temp file → download
 
         const res = await fetch(`${backendUrl}/export`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            input_path: videoPath,
-            output_path: outputPath,
-            keep_segments: [{ start: clip.startTime, end: clip.endTime }],
-            mode: 'fast',
-            format: 'mp4',
-          }),
+          body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error('Export failed');
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: res.statusText }));
+          throw new Error(err.detail || 'Export failed');
+        }
         const data = await res.json();
-        alert(`Clip exported to: ${data.output_path}`);
-      } catch (err) {
-        console.error(err);
-        alert('Failed to export clip. Check console for details.');
+
+        // Web / Azure VI: trigger browser download
+        if (!isLocalFile && data.output_path) {
+          const safeName = clip.title.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 40);
+          const dlUrl = `${backendUrl}/export/download?path=${encodeURIComponent(data.output_path)}&filename=${encodeURIComponent(safeName + '_clip.mp4')}`;
+          const a = document.createElement('a');
+          a.href = dlUrl;
+          a.download = `${safeName}_clip.mp4`;
+          a.click();
+        }
+
+        setExportClipDone(true);
+      } catch (err: any) {
+        setExportClipError(err.message || 'Export failed.');
       } finally {
         setExportingClipIndex(null);
       }
     },
-    [videoPath, backendUrl],
+    [videoInputPath, videoPath, isLocalFile, backendUrl],
   );
 
   return (
@@ -195,6 +230,10 @@ export default function AIPanel() {
                 </>
               )}
             </button>
+
+            {aiError && activeTab === 'filler' && (
+              <p className="text-xs text-editor-danger">{aiError}</p>
+            )}
 
             {fillerResult && fillerResult.fillerWords.length > 0 && (
               <div className="space-y-3">
@@ -262,6 +301,17 @@ export default function AIPanel() {
                 </>
               )}
             </button>
+
+            {aiError && activeTab === 'clips' && (
+              <p className="text-xs text-editor-danger">{aiError}</p>
+            )}
+
+            {exportClipDone && !exportClipError && (
+              <p className="text-xs text-editor-success">Clip exported successfully.</p>
+            )}
+            {exportClipError && (
+              <p className="text-xs text-editor-danger">{exportClipError}</p>
+            )}
 
             {clipSuggestions.length > 0 && (
               <div className="space-y-3">

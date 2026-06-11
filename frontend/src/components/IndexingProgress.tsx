@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Loader2, Download, Upload } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 const INDEXING_STEPS = [
   'Transcribing audio...',
@@ -16,12 +16,9 @@ interface Props {
   onError: (msg: string) => void;
 }
 
-type Phase = 'downloading' | 'uploading' | 'indexing';
-
 export default function IndexingProgress({ videoId, title, backendUrl, onDone, onError }: Props) {
   const [progress, setProgress] = useState(10);
   const [stepIdx, setStepIdx] = useState(0);
-  const [phase, setPhase] = useState<Phase>('indexing');
   const cancelledRef = useRef(false);
 
   useEffect(() => {
@@ -43,21 +40,6 @@ export default function IndexingProgress({ videoId, title, backendUrl, onDone, o
           const res = await fetch(`${backendUrl}/transcribe/azure/${videoId}/status`);
           if (!res.ok) continue;
           const { state } = await res.json();
-
-          // YouTube download/upload phases (returned by the job system)
-          if (state === 'Downloading') {
-            setPhase('downloading');
-            setProgress((p) => Math.min(p + 1, 35));
-            continue;
-          }
-          if (state === 'Uploading') {
-            setPhase('uploading');
-            setProgress((p) => Math.min(p + 1, 55));
-            continue;
-          }
-
-          // Azure VI phases
-          if (phase !== 'indexing') setPhase('indexing');
 
           if (state === 'Processed') {
             clearInterval(progressTimer);
@@ -87,21 +69,9 @@ export default function IndexingProgress({ videoId, title, backendUrl, onDone, o
   return (
     <div className="h-screen flex flex-col items-center justify-center gap-8 bg-editor-bg px-6">
       <div className="flex flex-col items-center gap-3 text-center">
-        {phase === 'downloading' ? (
-          <Download className="w-12 h-12 text-editor-accent animate-bounce" />
-        ) : phase === 'uploading' ? (
-          <Upload className="w-12 h-12 text-editor-accent animate-pulse" />
-        ) : (
-          <Loader2 className="w-12 h-12 text-editor-accent animate-spin" />
-        )}
+        <Loader2 className="w-12 h-12 text-editor-accent animate-spin" />
         <h2 className="text-xl font-semibold max-w-sm truncate">{title}</h2>
-        <p className="text-editor-text-muted text-sm">
-          {phase === 'downloading'
-            ? 'Downloading sermon video (this may take a few minutes)…'
-            : phase === 'uploading'
-            ? 'Uploading to Azure AI for transcription…'
-            : INDEXING_STEPS[stepIdx]}
-        </p>
+        <p className="text-editor-text-muted text-sm">{INDEXING_STEPS[stepIdx]}</p>
       </div>
 
       <div className="w-full max-w-sm space-y-2">
@@ -112,9 +82,7 @@ export default function IndexingProgress({ videoId, title, backendUrl, onDone, o
           />
         </div>
         <p className="text-[11px] text-editor-text-muted text-center">
-          {phase === 'indexing'
-            ? 'Usually 2–5 min per hour of video · powered by Azure AI Video Indexer'
-            : 'Downloading large sermon videos can take a few minutes'}
+          Usually 2–5 min per hour of video · powered by Azure AI Video Indexer
         </p>
       </div>
     </div>

@@ -39,6 +39,7 @@ class ExportRequest(BaseModel):
     format: str = "mp4"
     enhanceAudio: bool = False
     captions: str = "none"
+    aspect_ratio: str = "16:9"          # "16:9" | "9:16" | "1:1"
     words: Optional[List[ExportWordModel]] = None
     deleted_indices: Optional[List[int]] = None
     overlays: Optional[List[OverlayLayer]] = None
@@ -71,17 +72,23 @@ async def export_video(req: ExportRequest):
         if not segments:
             raise HTTPException(status_code=400, detail="No segments to export")
 
-        # Generate a temp output path when the client doesn't specify one (web mode)
+        # Generate a temp output path when the client doesn't specify one (web mode).
+        # Use mkstemp so the file exists before FFmpeg tries to write it (avoids TOCTOU).
         fmt = req.format or "mp4"
         temp_output = req.output_path is None
-        output_path = req.output_path or tempfile.mktemp(suffix=f".{fmt}", prefix="pj_export_")
+        if req.output_path:
+            output_path = req.output_path
+        else:
+            fd, output_path = tempfile.mkstemp(suffix=f".{fmt}", prefix="pj_export_")
+            os.close(fd)  # FFmpeg will overwrite it via -y
 
         has_overlays = bool(req.overlays)
-        use_stream_copy = req.mode == "fast" and len(segments) == 1 and not has_overlays
+        needs_reframe = req.aspect_ratio != "16:9"
+        use_stream_copy = req.mode == "fast" and len(segments) == 1 and not has_overlays and not needs_reframe
         needs_reencode_for_subs = req.captions == "burn-in"
 
-        # Burn-in captions or overlays require re-encode
-        if needs_reencode_for_subs or has_overlays:
+        # Burn-in captions, overlays, or reframe all require re-encode
+        if needs_reencode_for_subs or has_overlays or needs_reframe:
             use_stream_copy = False
 
         words_dicts = [w.model_dump() for w in req.words] if req.words else []
@@ -111,6 +118,7 @@ async def export_video(req: ExportRequest):
                     resolution=req.resolution,
                     format_hint=req.format,
                     subtitle_path=ass_path,
+                    aspect_ratio=req.aspect_ratio,
                 )
             elif ass_path:
                 output = export_reencode_with_subs(
@@ -120,6 +128,7 @@ async def export_video(req: ExportRequest):
                     ass_path,
                     resolution=req.resolution,
                     format_hint=req.format,
+                    aspect_ratio=req.aspect_ratio,
                 )
             else:
                 output = export_reencode(
@@ -128,6 +137,7 @@ async def export_video(req: ExportRequest):
                     segments,
                     resolution=req.resolution,
                     format_hint=req.format,
+                    aspect_ratio=req.aspect_ratio,
                 )
         finally:
             if ass_path and os.path.exists(ass_path):
@@ -183,14 +193,25 @@ async def download_export(path: str = Query(...), filename: str = Query("sermon_
     """
     Serve an exported file as a browser download attachment.
     Used by web clients after POST /export returns a temp output_path.
+    Deletes the temp file after the response is sent.
     """
     from pathlib import Path as P
+    from starlette.background import BackgroundTask
+
     file_path = P(path)
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="Export file not found")
+
+    def _cleanup():
+        try:
+            os.unlink(str(file_path))
+        except OSError:
+            pass
+
     return FileResponse(
         path=str(file_path),
         filename=filename,
         media_type="application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        background=BackgroundTask(_cleanup),
     )

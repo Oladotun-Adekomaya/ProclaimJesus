@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useEditorStore } from '../store/editorStore';
 
-export function useKeyboardShortcuts() {
+export function useKeyboardShortcuts(callbacks?: { onSave?: () => void }) {
   const deleteSelectedWords = useEditorStore((s) => s.deleteSelectedWords);
   const selectedWordIndices = useEditorStore((s) => s.selectedWordIndices);
 
@@ -116,7 +116,7 @@ export function useKeyboardShortcuts() {
         // --- Ctrl+S: save project ---
         case e.key === 's' && (e.ctrlKey || e.metaKey): {
           e.preventDefault();
-          saveProject();
+          callbacks?.onSave?.();
           return;
         }
 
@@ -143,46 +143,7 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [deleteSelectedWords, selectedWordIndices]);
-}
-
-async function saveProject() {
-  const state = useEditorStore.getState();
-  if (!state.videoPath || state.words.length === 0) return;
-
-  try {
-    const projectData = {
-      version: 1,
-      videoPath: state.videoPath,
-      words: state.words,
-      segments: state.segments,
-      deletedRanges: state.deletedRanges,
-      language: state.language,
-      createdAt: new Date().toISOString(),
-      modifiedAt: new Date().toISOString(),
-    };
-
-    const outputPath = await window.electronAPI?.saveFile({
-      defaultPath: state.videoPath.replace(/\.[^.]+$/, '.aive'),
-      filters: [{ name: 'CutScript Project', extensions: ['aive'] }],
-    });
-
-    if (outputPath) {
-      if (window.electronAPI?.writeFile) {
-        await window.electronAPI.writeFile(outputPath, JSON.stringify(projectData, null, 2));
-      } else {
-        const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = outputPath.split(/[\\/]/).pop() || 'project.aive';
-        a.click();
-        URL.revokeObjectURL(url);
-      }
-    }
-  } catch (err) {
-    console.error('Failed to save project:', err);
-  }
+  }, [deleteSelectedWords, selectedWordIndices, callbacks?.onSave]);
 }
 
 let cheatsheetVisible = false;

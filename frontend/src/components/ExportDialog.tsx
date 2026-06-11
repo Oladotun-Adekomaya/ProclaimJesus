@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { useEditorStore } from '../store/editorStore';
 import { useOverlayStore } from '../store/overlayStore';
+import { useIndexingStore } from '../store/indexingStore';
 import { Download, Loader2, Zap, Cog, Info, Layers } from 'lucide-react';
 import type { ExportOptions } from '../types/project';
 
@@ -9,6 +10,7 @@ const IS_ELECTRON = !!window.electronAPI;
 export default function ExportDialog() {
   const { videoPath, videoUrl, words, deletedRanges, isExporting, exportProgress, backendUrl, setExporting, getKeepSegments } =
     useEditorStore();
+  const { videoId } = useIndexingStore();
 
   // For Azure VI videos, videoPath is the title string, not a file path.
   // Use the actual stream URL as FFmpeg input in that case.
@@ -25,12 +27,13 @@ export default function ExportDialog() {
     format: 'mp4',
     enhanceAudio: false,
     captions: 'none',
+    aspectRatio: '16:9',
   });
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportDone, setExportDone] = useState(false);
 
-  // Overlays require re-encode; enforce it visually
-  const effectiveMode = hasOverlays ? 'reencode' : options.mode;
+  // Overlays or non-16:9 aspect ratio require re-encode; enforce it visually
+  const effectiveMode = (hasOverlays || options.aspectRatio !== '16:9') ? 'reencode' : options.mode;
 
   const handleExport = useCallback(async () => {
     if (!videoPath) return;
@@ -72,6 +75,7 @@ export default function ExportDialog() {
         format: options.format,
         enhanceAudio: options.enhanceAudio,
         captions: options.captions,
+        aspect_ratio: options.aspectRatio,
         overlays: hasOverlays ? overlayLayers : undefined,
       };
       if (outputPath) body.output_path = outputPath;
@@ -90,6 +94,12 @@ export default function ExportDialog() {
       const data = await res.json();
       setExporting(false, 100);
       setExportDone(true);
+
+      // Delete the video from Azure VI after export to preserve the 2,400-min lifetime quota.
+      // Fire-and-forget — don't block the user on this.
+      if (videoId) {
+        fetch(`${backendUrl}/transcribe/azure/${videoId}`, { method: 'DELETE' }).catch(() => {});
+      }
 
       // Web mode: trigger browser download from the temp output path
       if (!IS_ELECTRON && data.output_path) {
@@ -129,8 +139,8 @@ export default function ExportDialog() {
         <div className="grid grid-cols-2 gap-2">
           <ModeCard
             active={effectiveMode === 'fast'}
-            onClick={() => !hasOverlays && setOptions((o) => ({ ...o, mode: 'fast' }))}
-            disabled={hasOverlays}
+            onClick={() => !hasOverlays && options.aspectRatio === '16:9' && setOptions((o) => ({ ...o, mode: 'fast' }))}
+            disabled={hasOverlays || options.aspectRatio !== '16:9'}
             icon={<Zap className="w-4 h-4" />}
             title="Fast"
             desc="Stream copy, seconds"
@@ -166,6 +176,18 @@ export default function ExportDialog() {
           { value: 'mp4', label: 'MP4 (H.264)' },
           { value: 'mov', label: 'MOV (QuickTime)' },
           { value: 'webm', label: 'WebM (VP9)' },
+        ]}
+      />
+
+      {/* Aspect Ratio */}
+      <SelectField
+        label="Aspect Ratio"
+        value={options.aspectRatio}
+        onChange={(v) => setOptions((o) => ({ ...o, aspectRatio: v as ExportOptions['aspectRatio'] }))}
+        options={[
+          { value: '16:9', label: '16:9 — Landscape (default)' },
+          { value: '9:16', label: '9:16 — Vertical (Shorts / Reels)' },
+          { value: '1:1',  label: '1:1 — Square (Instagram)' },
         ]}
       />
 
@@ -237,6 +259,16 @@ export default function ExportDialog() {
         <div className="flex items-start gap-1.5 p-2 bg-editor-accent/10 rounded text-[10px] text-editor-accent">
           <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
           <span>Overlay layers require re-encode. Fast mode is disabled.</span>
+        </div>
+      )}
+      {options.aspectRatio !== '16:9' && (
+        <div className="flex items-start gap-1.5 p-2 bg-editor-accent/10 rounded text-[10px] text-editor-accent">
+          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+          <span>
+            {options.aspectRatio === '9:16'
+              ? 'Vertical crop uses face detection to center the speaker. Falls back to center crop if no face is found.'
+              : 'Square crop centers on the detected face, or the frame center if no face is found.'}
+          </span>
         </div>
       )}
     </div>

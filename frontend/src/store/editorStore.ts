@@ -46,6 +46,7 @@ interface EditorActions {
   getKeepSegments: () => Array<{ start: number; end: number }>;
   getWordAtTime: (time: number) => number;
   applyClipRange: (startTime: number, endTime: number) => void;
+  setVideoUrl: (url: string) => void;
   loadProject: (projectData: any) => void;
   reset: () => void;
 }
@@ -290,9 +291,19 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         return lo < words.length ? lo : words.length - 1;
       },
 
+      setVideoUrl: (url) => set({ videoUrl: url }),
+
       loadProject: (data) => {
         const backend = get().backendUrl;
-        const url = `${backend}/file?path=${encodeURIComponent(data.videoPath)}`;
+
+        // Local file paths get proxied through the backend file endpoint.
+        // Remote sources (Azure VI stream URLs) are used directly.
+        const isLocalPath =
+          data.videoPath &&
+          (data.videoPath.startsWith('/') || /^[A-Z]:\\/i.test(data.videoPath));
+        const videoUrl = isLocalPath
+          ? `${backend}/file?path=${encodeURIComponent(data.videoPath)}`
+          : (data.videoUrl ?? null);
 
         let globalIdx = 0;
         const annotatedSegments = (data.segments || []).map((seg: Segment) => {
@@ -304,12 +315,15 @@ export const useEditorStore = create<EditorState & EditorActions>()(
         set({
           ...initialState,
           backendUrl: backend,
-          videoPath: data.videoPath,
-          videoUrl: url,
+          videoPath: data.videoPath || data.title || 'Sermon',
+          videoUrl,
           words: data.words || [],
           segments: annotatedSegments,
           deletedRanges: data.deletedRanges || [],
           language: data.language || '',
+          speakers: data.speakers || [],
+          topics: data.topics || [],
+          keywords: data.keywords || [],
         });
       },
 

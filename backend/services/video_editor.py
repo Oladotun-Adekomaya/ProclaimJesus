@@ -13,6 +13,21 @@ from typing import List, Optional
 logger = logging.getLogger(__name__)
 
 
+def _safe_fps(r_frame_rate: str) -> float:
+    """Parse ffprobe r_frame_rate fraction (e.g. '30000/1001') safely."""
+    if "/" in r_frame_rate:
+        try:
+            num, den = r_frame_rate.split("/", 1)
+            den_i = int(den)
+            return round(int(num) / den_i, 3) if den_i else 0.0
+        except (ValueError, ZeroDivisionError):
+            return 0.0
+    try:
+        return float(r_frame_rate)
+    except ValueError:
+        return 0.0
+
+
 def _resolve_path(p: str) -> str:
     """Resolve a local path to absolute. Pass HTTP/HTTPS URLs through unchanged."""
     if p.startswith(('http://', 'https://')):
@@ -106,16 +121,28 @@ def export_stream_copy(
             pass
 
 
+def _get_scale_filter(input_path: str, resolution: str, aspect_ratio: str) -> str:
+    """Return an FFmpeg video filter string for scaling/cropping to the target aspect ratio."""
+    if aspect_ratio in ("9:16", "1:1"):
+        from services.auto_reframe import detect_face_x_ratio, build_reframe_filter
+        face_x = detect_face_x_ratio(input_path)
+        return build_reframe_filter(face_x, aspect_ratio, resolution)
+    # 16:9 default — simple scale
+    scale_map = {"720p": "scale=-2:720", "1080p": "scale=-2:1080", "4k": "scale=-2:2160"}
+    return scale_map.get(resolution, "scale=-2:1080")
+
+
 def export_reencode(
     input_path: str,
     output_path: str,
     keep_segments: List[dict],
     resolution: str = "1080p",
     format_hint: str = "mp4",
+    aspect_ratio: str = "16:9",
 ) -> str:
     """
     Export video with full re-encode. Slower but supports resolution changes,
-    format conversion, and avoids stream-copy edge cases.
+    format conversion, aspect-ratio reframe, and avoids stream-copy edge cases.
     """
     ffmpeg = _find_ffmpeg()
     input_path = _resolve_path(input_path)
@@ -123,12 +150,6 @@ def export_reencode(
 
     if not keep_segments:
         raise ValueError("No segments to export")
-
-    scale_map = {
-        "720p": "scale=-2:720",
-        "1080p": "scale=-2:1080",
-        "4k": "scale=-2:2160",
-    }
 
     filter_parts = []
     for i, seg in enumerate(keep_segments):
@@ -143,12 +164,9 @@ def export_reencode(
 
     filter_complex = "".join(filter_parts)
 
-    scale = scale_map.get(resolution, "")
-    if scale:
-        filter_complex += f";[outv]{scale}[outv_scaled]"
-        video_map = "[outv_scaled]"
-    else:
-        video_map = "[outv]"
+    scale = _get_scale_filter(input_path, resolution, aspect_ratio)
+    filter_complex += f";[outv]{scale}[outv_scaled]"
+    video_map = "[outv_scaled]"
 
     codec_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-c:a", "aac", "-b:a", "192k"]
     if format_hint == "webm":
@@ -165,7 +183,7 @@ def export_reencode(
         output_path,
     ]
 
-    logger.info(f"Re-encoding {n} segments -> {output_path} ({resolution})")
+    logger.info(f"Re-encoding {n} segments -> {output_path} ({resolution}, {aspect_ratio})")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg re-encode failed: {result.stderr[-500:]}")
@@ -180,6 +198,7 @@ def export_reencode_with_subs(
     subtitle_path: str,
     resolution: str = "1080p",
     format_hint: str = "mp4",
+    aspect_ratio: str = "16:9",
 ) -> str:
     """
     Export video with re-encode and burn-in subtitles (ASS format).
@@ -192,12 +211,6 @@ def export_reencode_with_subs(
 
     if not keep_segments:
         raise ValueError("No segments to export")
-
-    scale_map = {
-        "720p": "scale=-2:720",
-        "1080p": "scale=-2:1080",
-        "4k": "scale=-2:2160",
-    }
 
     filter_parts = []
     for i, seg in enumerate(keep_segments):
@@ -215,11 +228,8 @@ def export_reencode_with_subs(
     # Escape path for FFmpeg subtitle filter (Windows backslashes need escaping)
     escaped_sub = subtitle_path.replace("\\", "/").replace(":", "\\:")
 
-    scale = scale_map.get(resolution, "")
-    if scale:
-        filter_complex += f";[outv]{scale},ass='{escaped_sub}'[outv_final]"
-    else:
-        filter_complex += f";[outv]ass='{escaped_sub}'[outv_final]"
+    scale = _get_scale_filter(input_path, resolution, aspect_ratio)
+    filter_complex += f";[outv]{scale},ass='{escaped_sub}'[outv_final]"
     video_map = "[outv_final]"
 
     codec_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-c:a", "aac", "-b:a", "192k"]
@@ -237,7 +247,7 @@ def export_reencode_with_subs(
         output_path,
     ]
 
-    logger.info(f"Re-encoding {n} segments with subtitles -> {output_path} ({resolution})")
+    logger.info(f"Re-encoding {n} segments with subtitles -> {output_path} ({resolution}, {aspect_ratio})")
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg re-encode with subs failed: {result.stderr[-500:]}")
@@ -254,6 +264,7 @@ def export_with_overlays(
     resolution: str = "1080p",
     format_hint: str = "mp4",
     subtitle_path: Optional[str] = None,
+    aspect_ratio: str = "16:9",
 ) -> str:
     """
     Export with optional overlay layers (image/text) and optional burn-in subtitles.
@@ -268,12 +279,6 @@ def export_with_overlays(
     if not keep_segments:
         raise ValueError("No segments to export")
 
-    scale_map = {
-        "720p": "scale=-2:720",
-        "1080p": "scale=-2:1080",
-        "4k": "scale=-2:2160",
-    }
-
     # ── Build trim + concat ──────────────────────────────────────────────────
     filter_parts = []
     for i, seg in enumerate(keep_segments):
@@ -285,12 +290,11 @@ def export_with_overlays(
     concat_inputs = "".join(f"[v{i}][a{i}]" for i in range(n))
     filter_parts.append(f"{concat_inputs}concat=n={n}:v=1:a=1[outv][outa]")
 
-    # ── Scale ────────────────────────────────────────────────────────────────
-    scale = scale_map.get(resolution, "")
+    # ── Scale / crop ─────────────────────────────────────────────────────────
+    scale = _get_scale_filter(input_path, resolution, aspect_ratio)
     current_v = "outv"
-    if scale:
-        filter_parts.append(f"[outv]{scale}[outv_scaled]")
-        current_v = "outv_scaled"
+    filter_parts.append(f"[outv]{scale}[outv_scaled]")
+    current_v = "outv_scaled"
 
     # ── Overlay filters ──────────────────────────────────────────────────────
     # Image layers need extra -i inputs (starting at index 1 since 0 = main video)
@@ -321,10 +325,12 @@ def export_with_overlays(
         filter_parts.append(f"[{current_v}]ass='{escaped_sub}'[{next_label}]")
         current_v = next_label
 
-    # Assemble filter_complex (parts already contain ';' where needed for multi-line
-    # entries; join remaining with ';')
-    base = "".join(filter_parts[:n * 2 + 1])  # trim+concat parts (already ';' joined)
-    extra = ";".join(filter_parts[n * 2 + 1:])
+    # Assemble filter_complex.
+    # The first n entries are trim strings (each already ends with ';').
+    # Entry n is the concat string (no trailing ';').
+    # Remaining entries (scale, overlays, subs) must be joined with ';'.
+    base = "".join(filter_parts[:n + 1])  # n trims + concat
+    extra = ";".join(filter_parts[n + 1:])
     filter_complex = base + (";" + extra if extra else "")
 
     # ── Build command ────────────────────────────────────────────────────────
@@ -348,7 +354,7 @@ def export_with_overlays(
         output_path,
     ]
 
-    logger.info(f"Exporting {n} segments with overlays -> {output_path} ({resolution})")
+    logger.info(f"Exporting {n} segments with overlays -> {output_path} ({resolution}, {aspect_ratio})")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
@@ -388,7 +394,7 @@ def get_video_info(input_path: str) -> dict:
             "width": int(video_stream.get("width", 0)),
             "height": int(video_stream.get("height", 0)),
             "codec": video_stream.get("codec_name", ""),
-            "fps": eval(video_stream.get("r_frame_rate", "0/1")) if "/" in video_stream.get("r_frame_rate", "") else 0,
+            "fps": _safe_fps(video_stream.get("r_frame_rate", "")),
         }
     except Exception as e:
         logger.error(f"Failed to get video info: {e}")

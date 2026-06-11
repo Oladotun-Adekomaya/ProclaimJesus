@@ -8,7 +8,7 @@ from fastapi import FastAPI, Query, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from routers import transcribe, transcription, export, ai, captions, audio
+from routers import transcription, export, ai
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -16,13 +16,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("AI Video Editor backend starting up")
+    logger.info("ProclaimJesus backend starting up")
     yield
-    logger.info("AI Video Editor backend shutting down")
+    logger.info("ProclaimJesus backend shutting down")
 
 
 app = FastAPI(
-    title="AI Video Editor Backend",
+    title="ProclaimJesus Backend",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -36,12 +36,9 @@ app.add_middleware(
     expose_headers=["Content-Range", "Accept-Ranges", "Content-Length"],
 )
 
-app.include_router(transcribe.router)
 app.include_router(transcription.router)
 app.include_router(export.router)
 app.include_router(ai.router)
-app.include_router(captions.router)
-app.include_router(audio.router)
 
 
 MIME_MAP = {

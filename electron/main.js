@@ -100,6 +100,16 @@ ipcMain.handle('dialog:openProject', async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+ipcMain.handle('dialog:saveProject', async (_event, defaultName) => {
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: defaultName || 'sermon.pj',
+    filters: [
+      { name: 'ProclaimJesus Project', extensions: ['pj'] },
+    ],
+  });
+  return result.canceled ? null : result.filePath;
+});
+
 ipcMain.handle('safe-storage:encrypt', (_event, data) => {
   if (safeStorage.isEncryptionAvailable()) {
     return safeStorage.encryptString(data).toString('base64');
